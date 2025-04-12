@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>OracleAuth QR Generator & Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <!-- Updated QRCode Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+    import { getDatabase, ref, set, child, get } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCY4DiiHh8iiPXJdcUC1pjJHBZsVgtgBJ8",
+      authDomain: "oracle-auth-35a68.firebaseapp.com",
+      projectId: "oracle-auth-35a68",
+      storageBucket: "oracle-auth-35a68.appspot.com",
+      messagingSenderId: "91927544638",
+      appId: "1:91927544638:web:931caf1bc681e2bc5e226f",
+      measurementId: "G-6HFVBG16NH"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const database = getDatabase(app);
+
+    window.firebaseDatabase = database;
+    window.firebaseRef = ref;
+    window.firebaseSet = set;
+    window.firebaseGet = get;
+    window.firebaseChild = child;
+  </script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      text-align: center;
+      margin: 30px;
+      background: #ffffff;
+      color: #000;
+    }
+    input, button, select {
+      padding: 10px;
+      margin: 8px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      background: #f9f9f9;
+      color: #000;
+      width: 250px;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      cursor: pointer;
+      border: none;
+    }
+    #qrCode {
+      margin-top: 20px;
+      display: inline-block;
+      text-align: center; /* Ensure that the QR code canvas itself is centered */
+    }
+    #result {
+      margin-top: 20px;
+    }
+    canvas {
+      background: white;
+      padding: 10px;
+      border-radius: 12px;
+      margin: 0 auto; /* Make the canvas block level */
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <h1>OracleAuth QR Generator</h1>
+  <input type="text" id="name" placeholder="Name" /><br />
+  <input type="text" id="uid" placeholder="UID" /><br />
+  <input type="date" id="dob" placeholder="Date of Birth" /><br />
+  <input type="email" id="email" placeholder="Email" /><br />
+  <button id="generateQRCodeButton">Generate QR Code</button>
+
+  <div id="qrCode"></div>  <!-- This will be positioned below the button -->
+  <div id="result"></div>
+
+  <h2>Scan QR to Retrieve Data</h2>
+  <div id="reader" style="width:300px; margin: auto;"></div>
+  <button id="retryBtn" style="display:none; margin-top: 10px;" onclick="startScanner()">Scan Again</button>
+
+  <script type="module">
+    // Function to generate QR code with hash key
+    function createQRData() {
+      const name = document.getElementById("name").value;
+      const uid = document.getElementById("uid").value;
+      const dob = document.getElementById("dob").value;
+      const email = document.getElementById("email").value;
+
+      // Check if all fields are filled
+      if (!name || !uid || !dob || !email) {
+        alert("Please fill in all the fields.");
+        return;
+      }
+
+      // Creating the identity object
+      const identity = { name, uid, dob, email };
+      const jsonString = JSON.stringify(identity);
+      const hashKey = CryptoJS.SHA256(jsonString).toString();
+      const qrPayload = "oracleauth:" + hashKey;
+
+      // Save the identity data to Firebase
+      window.firebaseSet(window.firebaseRef(window.firebaseDatabase, "hashkeys/" + hashKey), identity);
+
+      // Clear previous QR code
+      document.getElementById("qrCode").innerHTML = '';
+
+      // Generate QR code using QRCode.js
+      new QRCode(document.getElementById("qrCode"), {
+        text: qrPayload,
+        width: 128,
+        height: 128,
+      });
+    }
+
+    // Event listener for the Generate QR Code button
+    document.getElementById("generateQRCodeButton").addEventListener("click", createQRData);
+
+    // Function to start the scanner
+    let html5QrCode;
+
+    async function startScanner() {
+      const resultEl = document.getElementById("result");
+      resultEl.innerText = "";
+      document.getElementById("retryBtn").style.display = "none";
+
+      const devices = await Html5Qrcode.getCameras();
+      const backCam = devices.find(d => /back|rear/i.test(d.label)) || devices[0];
+
+      if (!html5QrCode) {
+        html5QrCode = new Html5Qrcode("reader");
+      } else {
+        try {
+          await html5QrCode.stop();
+        } catch (e) {}
+      }
+
+      await html5QrCode.start(
+        { deviceId: { exact: backCam.id } },
+        { fps: 10, qrbox: 250 },
+        (decodedText) => {
+          html5QrCode.stop();
+          document.getElementById("retryBtn").style.display = "inline-block";
+
+          if (decodedText.startsWith("oracleauth:")) {
+            const hash = decodedText.replace("oracleauth:", "");
+            showData(hash);
+          } else {
+            resultEl.innerText = "❌ Invalid QR Code: Not an OracleAuth QR.";
+          }
+        },
+        (errorMessage) => {
+          // Ignore scanning errors
+        }
+      );
+    }
+
+    // Function to retrieve data from Firebase
+    function showData(hash) {
+      const resultEl = document.getElementById('result');
+      const dbRef = window.firebaseRef(window.firebaseDatabase);
+
+      window.firebaseGet(window.firebaseChild(dbRef, "hashkeys/" + hash))
+        .then((snapshot) => {
+          if (snapshot.exists()) {
+            const parsed = snapshot.val();
+            resultEl.innerHTML = `
+              <div style="text-align: left; display: inline-block; font-size: 16px;">
+                <strong>Name:</strong> ${parsed.name}<br>
+                <strong>UID:</strong> ${parsed.uid}<br>
+                <strong>Date of Birth:</strong> ${parsed.dob}<br>
+                <strong>Email:</strong> ${parsed.email}<br>
+              </div>
+            `;
+          } else {
+            resultEl.innerText = "⚠️ No data found for this QR.";
+          }
+        })
+        .catch((error) => {
+          resultEl.innerText = "Error retrieving data: " + error;
+        });
+    }
+
+    // Start scanner on page load
+    window.onload = startScanner;
+  </script>
+</body>
+</html>
